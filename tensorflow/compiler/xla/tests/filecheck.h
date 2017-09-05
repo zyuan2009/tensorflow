@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/statusor.h"
 
+using namespace std;
 namespace xla {
 
 // Runs FileCheck with the given pattern over given input string. Provided that

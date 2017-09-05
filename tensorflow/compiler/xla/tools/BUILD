@@ -110,6 +110,7 @@ cc_binary(
     name = "replay_computation_hlo_evaluator",
     deps = [
         ":replay_computation_library",
+        "//tensorflow/compiler/jit",
         "//tensorflow/compiler/plugin/executor:plugin_lib",
     ],
 )
