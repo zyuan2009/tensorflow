@@ -112,6 +112,11 @@ cc_binary(
         ":replay_computation_library",
         "//tensorflow/compiler/jit",
         "//tensorflow/compiler/plugin/executor:plugin_lib",
+        # TODO: This dependency is a workaround for linking error with clang.
+        # Without it, linker complains about missing symbols from
+        # 'xla_device_launch_op'. This dependency should be propagated from
+        # plugin_lib instead, but no targets other than this break without it.
+        "//tensorflow/compiler/jit",
     ],
 )
 
