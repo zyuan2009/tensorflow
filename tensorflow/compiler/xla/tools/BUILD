@@ -110,7 +110,6 @@ cc_binary(
     name = "replay_computation_hlo_evaluator",
     deps = [
         ":replay_computation_library",
-        "//tensorflow/compiler/jit",
         "//tensorflow/compiler/plugin/executor:plugin_lib",
         # TODO: This dependency is a workaround for linking error with clang.
         # Without it, linker complains about missing symbols from
