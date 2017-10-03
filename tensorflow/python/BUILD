@@ -50,7 +50,6 @@ py_library(
         "//tensorflow/tools/quantization:__pkg__",  # TODO(b/34059704): remove when fixed
     ],
     deps = [
-        ":tf_optimizer",
         ":array_ops",
         ":bitwise_ops",
         ":check_ops",
@@ -63,15 +62,20 @@ py_library(
         ":framework_for_generated_wrappers",
         ":functional_ops",
         ":gradient_checker",
+        ":graph_util",
         ":histogram_ops",
         ":image_ops",
         ":initializers_ns",
         ":io_ops",
+        ":layers",
         ":lib",
         ":linalg_ns",
         ":math_ops",
+        ":metrics",
         ":nn",
+        ":ops",
         ":platform",
+        ":pywrap_tensorflow",
         ":script_ops",
         ":session_ops",
         ":sets",
@@ -81,24 +85,26 @@ py_library(
         ":state_ops",
         ":string_ops",
         ":summary",
-        ":metrics",
-        ":layers",
         ":tensor_array_ops",
         ":training",
-        ":ops",
         ":saver_test_utils",
         ":subscribe",
         ":test_ops",  # TODO: Break testing code out into separate rule.
+        ":tf_item",
+        ":tf_cluster",
+        ":tf_optimizer",
         ":util",
         ":weights_broadcast_ops",
         "//third_party/py/numpy",
+        "//tensorflow/core:protos_all_py",
+        "//tensorflow/python/data",
         "//tensorflow/python/estimator:estimator_py",
         "//tensorflow/python/feature_column:feature_column_py",
+        "//tensorflow/python/keras",
         "//tensorflow/python/ops/losses",
         "//tensorflow/python/ops/distributions",
         "//tensorflow/python/profiler",
         "//tensorflow/python/saved_model",
-        "//tensorflow/python/keras",
     ] + if_not_windows([
         "//tensorflow/contrib:contrib_py",
     ]),
@@ -260,6 +266,7 @@ cc_library(
     hdrs = ["lib/core/safe_ptr.h"],
     deps = [
         "//tensorflow/c:c_api",
+        "//tensorflow/c/eager:c_api",
         "//util/python:python_headers",
     ],
 )
@@ -2546,6 +2553,7 @@ cuda_py_test(
         ":nn_grad",
         "//third_party/py/numpy",
     ],
+    shard_count = 4,
 )
 
 cuda_py_test(
@@ -2952,7 +2960,9 @@ tf_py_wrap_cc(
         "client/tf_sessionrun_wrapper.i",
         "framework/cpp_shape_inference.i",
         "framework/python_op_gen.i",
+        "grappler/cluster.i",
         "grappler/cost_analyzer.i",
+        "grappler/item.i",
         "grappler/model_analyzer.i",
         "grappler/tf_optimizer.i",
         "lib/core/py_func.i",
@@ -4146,6 +4156,66 @@ cuda_py_test(
 )
 
 py_library(
+    name = "tf_item",
+    srcs = [
+        "grappler/item.py",
+    ],
+    srcs_version = "PY2AND3",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pywrap_tensorflow_internal",
+        "//tensorflow/core/grappler/costs:op_performance_data_py",
+    ],
+)
+
+py_test(
+    name = "item_test",
+    size = "small",
+    srcs = [
+        "grappler/item_test.py",
+    ],
+    srcs_version = "PY2AND3",
+    tags = ["no_pip"],  # tf_optimizer is not available in pip.
+    deps = [
+        ":client_testlib",
+        ":framework_for_generated_wrappers",
+        ":math_ops",
+        ":tf_item",
+        "//tensorflow/core:protos_all_py",
+    ],
+)
+
+py_library(
+    name = "tf_cluster",
+    srcs = [
+        "grappler/cluster.py",
+    ],
+    srcs_version = "PY2AND3",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pywrap_tensorflow_internal",
+        "//tensorflow/core/grappler/costs:op_performance_data_py",
+    ],
+)
+
+py_test(
+    name = "cluster_test",
+    size = "small",
+    srcs = [
+        "grappler/cluster_test.py",
+    ],
+    srcs_version = "PY2AND3",
+    tags = ["no_pip"],  # tf_optimizer is not available in pip.
+    deps = [
+        ":client_testlib",
+        ":framework_for_generated_wrappers",
+        ":tf_cluster",
+        ":tf_item",
+        "//tensorflow/core:protos_all_py",
+    ],
+)
+
+py_library(
     name = "tf_optimizer",
     srcs = [
         "grappler/tf_optimizer.py",
@@ -4158,7 +4228,11 @@ py_library(
 py_test(
     name = "tf_optimizer_test",
     size = "small",
-    srcs = ["grappler/tf_optimizer_test.py"],
+    srcs = [
+        "grappler/cluster_test.py",
+        "grappler/item_test.py",
+        "grappler/tf_optimizer_test.py",
+    ],
     srcs_version = "PY2AND3",
     tags = ["no_pip"],  # tf_optimizer is not available in pip.
     deps = [

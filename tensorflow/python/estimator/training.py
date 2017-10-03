@@ -28,12 +28,13 @@ import six
 
 from tensorflow.core.protobuf import config_pb2
 from tensorflow.python.estimator import estimator as estimator_lib
+from tensorflow.python.estimator import export_strategy as export_strategy_lib
 from tensorflow.python.estimator import run_config as run_config_lib
 from tensorflow.python.framework import ops
 from tensorflow.python.platform import tf_logging as logging
-from tensorflow.python.training import saver
 from tensorflow.python.training import server_lib
 from tensorflow.python.training import session_run_hook
+from tensorflow.python.util import compat
 
 
 _MAX_DELAY_SECS = 60
@@ -59,6 +60,41 @@ def _validate_hooks(hooks):
           'All hooks must be `SessionRunHook` instances, given: {}'.format(
               hook))
   return hooks
+
+
+def _validate_export_strategies(export_strategies):
+  """Validates `export_strategies` and returns them as a tuple."""
+  if not export_strategies:
+    return ()
+
+  if isinstance(export_strategies, export_strategy_lib.ExportStrategy):
+    return (export_strategies,)
+
+  unique_names = []  # ExportStrategies should have unique names.
+
+  try:
+    for export_strategy in export_strategies:
+      if not isinstance(export_strategy,
+                        export_strategy_lib.ExportStrategy):
+        raise TypeError
+
+      if export_strategy.name in unique_names:
+        raise ValueError('`export_strategies` must have unique names.'
+                         ' Attempting to use an ExportStrategy "%s" together'
+                         ' others with names %s' % (export_strategy.name,
+                                                    unique_names))
+      unique_names.append(export_strategy.name)
+  except TypeError:
+    # Two possibilities:
+    # - `export_strategies` is neither ExportStrategy nor iterable.  Python has
+    #   raised a TypeError when iterating over 'export_strategies'.
+    # - a single `export_strategy` wasn't of type `ExportStrategy`, so we raised
+    #   TypeError.
+    raise TypeError('`export_strategies` must be an ExportStrategy,'
+                    ' an iterable of ExportStrategy, or `None`,'
+                    ' found %s.' % export_strategies)
+
+  return tuple(export_strategies)
 
 
 def _is_google_env():
@@ -179,8 +215,7 @@ class EvalSpec(
     hooks = _validate_hooks(hooks)
 
     # Validate export_strategies.
-    export_strategies = tuple(export_strategies or [])
-    # TODO(b/65169058): Validate export_strategies once `ExportStratey` defined.
+    export_strategies = _validate_export_strategies(export_strategies)
 
     # Validate delay_secs.
     if delay_secs < 0:
@@ -201,6 +236,66 @@ class EvalSpec(
         export_strategies=export_strategies,
         delay_secs=delay_secs,
         throttle_secs=throttle_secs)
+
+
+# TODO(xiejw): Write detailed docstring to cover local behavior and distributed
+# behavior. Also write examples for both with TF_CONFIG.
+def train_and_evaluate(estimator, train_spec, eval_spec):
+  """Train and evaluate the `estimator`."""
+
+  if not isinstance(estimator, estimator_lib.Estimator):
+    raise TypeError('`estimator` must have type `tf.estimator.Estimator`, '
+                    'given {}'.format(type(estimator)))
+  config = estimator.config
+
+  executor = _TrainingExecutor(estimator=estimator, train_spec=train_spec,
+                               eval_spec=eval_spec)
+
+  if (not config.cluster_spec and
+      config.task_type != run_config_lib.TaskType.EVALUATOR):
+    logging.info('Running training and evaluation locally (non-distributed).')
+    return executor.run_local()
+
+  # Distributed case.
+  if not config.task_type:
+    # TODO(xiejw): Improve the error message about how to set the TF_CONFIG
+    # correctly.
+    raise ValueError(
+        '`estimator.config` must have task_type set. This usually means '
+        'TF_CONFIG environment is not set correctly.')
+
+  if config.task_type == 'local':
+    raise ValueError(
+        '`task.type` in TF_CONFIG cannot be `local`. Leaving `cluster` and '
+        '`task` properties in TF_CONFIG absent triggers train and evaluate '
+        '`Estimator` locally (non-distributed).')
+
+  # For task type foo, call executor.run_foo.
+  available_tasks = [x for x in dir(executor) if x.startswith('run_')
+                     and x != 'run_local'
+                     and callable(getattr(executor, x))]
+  task_to_run = 'run_' + config.task_type
+  if task_to_run not in available_tasks:
+    raise ValueError(
+        'Task type {} is not supported. Supported task types are {}'.format(
+            config.task_type, [x[len('run_'):] for x in available_tasks]))
+  return getattr(executor, task_to_run)()
+
+
+class _StopAtSecsHook(session_run_hook.SessionRunHook):
+  """Stops given secs after begin is called."""
+
+  def __init__(self, stop_after_secs):
+    self._stop_after_secs = stop_after_secs
+    self._start_time = None
+
+  def begin(self):
+    self._start_time = time.time()
+
+  def after_run(self, run_context, run_values):
+    del run_values
+    if time.time() - self._start_time >= self._stop_after_secs:
+      run_context.request_stop()
 
 
 class UnimplementedError(Exception):
@@ -241,6 +336,18 @@ class _TrainingExecutor(object):
     # TODO(xiejw): To allow execution framework to add train hooks.
     return self._start_distributed_training()
 
+  def run_master(self):
+    """Runs task master."""
+
+    # TODO(b/66720832): Once listener API is added into Estimator.train, the
+    # eval and export process should be wrapped as a listener and passed to
+    # _start_distributed_training. The expected behavior should be
+    # 1. The export is invoked after each intermediate evaluation.
+    # 2. The evaluation and export should be invoked correctly at the end of
+    # training. This should be fine if the listener works as intended (it will
+    # send the `after_save` signal for the final ckpt saving).
+    return self._start_distributed_training()
+
   def run_evaluator(self):
     """Runs task evaluator."""
     # TODO(xiejw): To allow execution framework to add continuous eval listener.
@@ -254,7 +361,39 @@ class _TrainingExecutor(object):
 
   def run_local(self):
     """Runs training and evaluation locally (non-distributed)."""
-    raise UnimplementedError('Method run_local has not been implemented.')
+
+    def _should_stop_local_train(global_step):
+      if self._train_spec.max_steps is None:
+        return False
+      if global_step >= self._train_spec.max_steps:
+        return True
+      return False
+
+    if self._eval_spec.throttle_secs <= 0:
+      raise ValueError('eval_spec.throttle_secs should be positive, given: {}.'
+                       'It is used do determine how long each training '
+                       'iteration should go when train and evaluate '
+                       'locally.'.format(
+                           self._eval_spec.throttle_secs))
+
+    stop_hook = _StopAtSecsHook(self._eval_spec.throttle_secs)
+    train_hooks = list(self._train_spec.hooks) + [stop_hook]
+    logging.info('Start train and evaluate loop. The evaluate will happen '
+                 'after {} secs (eval_spec.throttle_secs) or training is '
+                 'finished.'.format(self._eval_spec.throttle_secs))
+
+    evaluator = _TrainingExecutor._Evaluator(self._estimator, self._eval_spec)
+
+    while True:
+      self._estimator.train(
+          input_fn=self._train_spec.input_fn,
+          max_steps=self._train_spec.max_steps,
+          hooks=train_hooks)
+
+      metrics = evaluator.evaluate_and_export()
+
+      if _should_stop_local_train(metrics[ops.GraphKeys.GLOBAL_STEP]):
+        break
 
   def _start_std_server(self, config):
     """Creates, starts, and returns a server_lib.Server."""
@@ -347,7 +486,7 @@ class _TrainingExecutor(object):
         Evaluation results. Returns `None` if current round of evaluation is
         skipped.
       """
-      latest_ckpt_path = saver.latest_checkpoint(self._estimator.model_dir)
+      latest_ckpt_path = self._estimator.latest_checkpoint()
       if not latest_ckpt_path:
         self._log_err_msg('Estimator is not trained yet. Will start an '
                           'evaluation when a checkpoint is ready.')
@@ -359,7 +498,6 @@ class _TrainingExecutor(object):
             'evaluation pass as evaluation results are expected to be same '
             'for the same checkpoint.')
         return None
-
       eval_result = self._estimator.evaluate(
           input_fn=self._eval_spec.input_fn,
           steps=self._eval_spec.steps,
@@ -371,7 +509,7 @@ class _TrainingExecutor(object):
         self._log_err_msg('Estimator evaluate returns empty result.')
         return None
 
-      # TODO(b/65169058): Adds export once export strategies are moved.
+      self._export_eval_result(eval_result, latest_ckpt_path)
 
       self._last_warning_time = 0
       self._previous_ckpt_path = latest_ckpt_path
@@ -383,3 +521,18 @@ class _TrainingExecutor(object):
       if current_time - self._last_warning_time > 600:
         logging.warning(message)
         self._last_warning_time = current_time
+
+    def _export_eval_result(self, eval_result, checkpoint_path):
+      """Export `eval_result` according to strategies in `EvalSpec`."""
+      export_dir_base = os.path.join(
+          compat.as_str_any(self._estimator.model_dir),
+          compat.as_str_any('export'))
+
+      for strategy in self._eval_spec.export_strategies:
+        strategy.export(
+            self._estimator,
+            os.path.join(
+                compat.as_str_any(export_dir_base),
+                compat.as_str_any(strategy.name)),
+            checkpoint_path=checkpoint_path,
+            eval_result=eval_result)
