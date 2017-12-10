@@ -152,19 +152,13 @@ class LayerCollection(object):
     """LossFunctions registered with this LayerCollection."""
     return list(self._loss_dict.values())
 
-  def is_variable_registered(self, variable):
-    """Checks whether the variable has already been registered.
-
-    Args:
-      variable: A single variable or tensor.
-    Returns:
-      True if the variable has been registered either by itself or as part of a
-      tuple.
-    """
-    return any([
-        variable in key if isinstance(key, (tuple, list)) else variable == key
-        for key in self.fisher_blocks.keys()
-    ])
+  @property
+  def registered_variables(self):
+    """A tuple of all of the variables currently registered."""
+    tuple_of_tuples = (ensure_sequence(key) for key, block
+                       in six.iteritems(self.fisher_blocks))
+    flat_tuple = tuple(item for tuple_ in tuple_of_tuples for item in tuple_)
+    return flat_tuple
 
   @property
   def linked_parameters(self):
@@ -184,8 +178,7 @@ class LayerCollection(object):
   def default_generic_approximation(self):
     return self._default_generic_approximation
 
-  @default_generic_approximation.setter
-  def default_generic_approximation(self, value):
+  def set_default_generic_approximation(self, value):
     if value not in _GENERIC_APPROX_TO_BLOCK_TYPES:
       raise ValueError(
           "{} is not a valid approximation for generic variables.".format(
@@ -196,8 +189,7 @@ class LayerCollection(object):
   def default_fully_connected_approximation(self):
     return self._default_fully_connected_approximation
 
-  @default_fully_connected_approximation.setter
-  def default_fully_connected_approximation(self, value):
+  def set_default_fully_connected_approximation(self, value):
     if value not in _FULLY_CONNECTED_APPROX_TO_BLOCK_TYPES:
       raise ValueError(
           "{} is not a valid approximation for fully connected layers.".format(
@@ -208,8 +200,7 @@ class LayerCollection(object):
   def default_conv2d_approximation(self):
     return self._default_convolution_2d_approximation
 
-  @default_conv2d_approximation.setter
-  def default_conv2d_approximation(self, value):
+  def set_default_conv2d_approximation(self, value):
     if value not in _CONV2D_APPROX_TO_BLOCK_TYPES:
       raise ValueError(
           "{} is not a valid approximation for 2d convolutional layers.".format(

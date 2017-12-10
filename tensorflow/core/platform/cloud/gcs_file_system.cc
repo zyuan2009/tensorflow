@@ -22,6 +22,9 @@ limitations under the License.
 #include <cstring>
 #include <fstream>
 #include <vector>
+#ifdef _WIN32
+#include <io.h>  //for _mktemp
+#endif
 #include "include/json/json.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
@@ -39,6 +42,12 @@ limitations under the License.
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/thread_annotations.h"
+
+#ifdef _WIN32
+#ifdef DeleteFile
+#undef DeleteFile
+#endif
+#endif
 
 namespace tensorflow {
 
@@ -95,16 +104,25 @@ const FileStatistics DIRECTORY_STAT(0, 0, true);
 // userspace DNS cache.
 constexpr char kResolveCacheSecs[] = "GCS_RESOLVE_REFRESH_SECS";
 
+// TODO: DO NOT use a hardcoded path
 Status GetTmpFilename(string* filename) {
   if (!filename) {
     return errors::Internal("'filename' cannot be nullptr.");
   }
+#ifndef _WIN32
   char buffer[] = "/tmp/gcs_filesystem_XXXXXX";
   int fd = mkstemp(buffer);
   if (fd < 0) {
     return errors::Internal("Failed to create a temporary file.");
   }
   close(fd);
+#else
+  char buffer[] = "/tmp/gcs_filesystem_XXXXXX";
+  char* ret = _mktemp(buffer);
+  if (ret == nullptr) {
+    return errors::Internal("Failed to create a temporary file.");
+  }
+#endif
   *filename = buffer;
   return Status::OK();
 }
@@ -292,6 +310,7 @@ class GcsWritableFile : public WritableFile {
         file_cache_erase_(std::move(file_cache_erase)),
         sync_needed_(true),
         initial_retry_delay_usec_(initial_retry_delay_usec) {
+    // TODO: to make it safer, outfile_ should be constructed from an FD
     if (GetTmpFilename(&tmp_content_filename_).ok()) {
       outfile_.open(tmp_content_filename_,
                     std::ofstream::binary | std::ofstream::app);
@@ -416,7 +435,7 @@ class GcsWritableFile : public WritableFile {
       return errors::Internal("'size' cannot be nullptr");
     }
     const auto tellp = outfile_.tellp();
-    if (tellp == -1) {
+    if (tellp == static_cast<std::streampos>(-1)) {
       return errors::Internal(
           "Could not get the size of the internal temporary file.");
     }
@@ -697,6 +716,9 @@ Status GcsFileSystem::LoadBufferFromGCS(const string& filename, size_t offset,
   TF_RETURN_WITH_CONTEXT_IF_ERROR(request->Send(), " when reading gs://",
                                   bucket, "/", object);
 
+  VLOG(1) << "Successful read of gs://" << bucket << "/" << object << " @ "
+          << offset << " of size: " << out->size();
+
   if (out->size() < block_size()) {
     // Check stat cache to see if we encountered an interrupted read.
     FileStatistics stat;
@@ -706,6 +728,8 @@ Status GcsFileSystem::LoadBufferFromGCS(const string& filename, size_t offset,
             "File contents are inconsistent for file: %s @ %lu.",
             filename.c_str(), offset));
       }
+      VLOG(2) << "Successful integrity check for: gs://" << bucket << "/"
+              << object << " @ " << offset;
     }
   }
 
@@ -867,6 +891,11 @@ Status GcsFileSystem::StatForObject(const string& fname, const string& bucket,
         string updated;
         TF_RETURN_IF_ERROR(GetStringValue(root, "updated", &updated));
         TF_RETURN_IF_ERROR(ParseRfc3339Time(updated, &(stat->mtime_nsec)));
+
+        VLOG(1) << "Stat of: gs://" << bucket << "/" << object << " -- "
+                << " length: " << stat->length
+                << "; mtime_nsec: " << stat->mtime_nsec
+                << "; updated: " << updated;
 
         stat->is_directory = false;
         return Status::OK();

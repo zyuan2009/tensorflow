@@ -287,7 +287,7 @@ Status CpuCompiler::RunHloPasses(HloModule* module, bool is_aot_compile) {
     pass.AddPass<AlgebraicSimplifier>(
         /*is_layout_sensitive=*/false,
         [](const Shape&, const Shape&) { return false; },
-        /*enable_dot_simplification=*/false);
+        /*enable_dot_strength_reduction=*/false);
     pass.AddPass<TupleSimplifier>();
     pass.AddPass<WhileLoopSimplifier>();
     pass.AddPass<HloDCE>();
@@ -316,7 +316,7 @@ Status CpuCompiler::RunHloPasses(HloModule* module, bool is_aot_compile) {
   pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(
       /*is_layout_sensitive=*/true,
       [](const Shape&, const Shape&) { return true; },
-      /*enable_dot_simplification=*/false);
+      /*enable_dot_strength_reduction=*/false);
   pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/true);
   // Outline ops in the entry computation into calls to subcomputations.
   const int max_parallelism =
@@ -528,9 +528,9 @@ StatusOr<std::unique_ptr<Executable>> CpuCompiler::RunBackend(
     // uses data dependencies for determining order.
     TF_ASSIGN_OR_RETURN(
         std::unique_ptr<BufferAssignment> assignment,
-        BufferAssigner::Run(module.get(),
-                            xla::MakeUnique<DependencyHloOrdering>(module.get()),
-                            BufferSizeBytesFunction(), memory_alignment));
+        BufferAssigner::Run(
+            module.get(), xla::MakeUnique<DependencyHloOrdering>(module.get()),
+            BufferSizeBytesFunction(), memory_alignment));
     // BufferAssignment::ToString() includes a header, so no need for us to
     // print one ourselves.
     XLA_VLOG_LINES(2, assignment->ToString());
@@ -642,10 +642,10 @@ StatusOr<std::unique_ptr<Executable>> CpuCompiler::RunBackend(
     // temporary buffers are required to run the computation.
     TF_ASSIGN_OR_RETURN(
         std::unique_ptr<BufferAssignment> assignment,
-        BufferAssigner::Run(
-            module.get(),
-            xla::MakeUnique<SequentialHloOrdering>(module.get(), module_sequence),
-            BufferSizeBytesFunction(), memory_alignment));
+        BufferAssigner::Run(module.get(),
+                            xla::MakeUnique<SequentialHloOrdering>(
+                                module.get(), module_sequence),
+                            BufferSizeBytesFunction(), memory_alignment));
     // BufferAssignment::ToString() includes a header, so no need for us to
     // print one ourselves.
     XLA_VLOG_LINES(2, assignment->ToString());
@@ -824,7 +824,8 @@ CpuCompiler::CompileAheadOfTime(std::vector<std::unique_ptr<HloModule>> modules,
     TF_ASSIGN_OR_RETURN(
         std::unique_ptr<BufferAssignment> assignment,
         BufferAssigner::Run(
-            module, xla::MakeUnique<SequentialHloOrdering>(module, module_sequence),
+            module,
+            xla::MakeUnique<SequentialHloOrdering>(module, module_sequence),
             BufferSizeBytesFunction(), memory_alignment));
     // BufferAssignment::ToString() includes a header, so no need for us to
     // print one ourselves.

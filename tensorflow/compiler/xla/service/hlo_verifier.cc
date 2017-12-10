@@ -75,7 +75,11 @@ class ShapeVerifier : public DfsHloVisitor {
   }
 
   Status HandleDot(HloInstruction* dot) override {
-    return CheckBinaryShape(dot);
+    TF_ASSIGN_OR_RETURN(const Shape expected,
+                        ShapeInference::InferDotOpShape(
+                            dot->operand(0)->shape(), dot->operand(1)->shape(),
+                            dot->dot_dimension_numbers()));
+    return CheckShape(dot, expected);
   }
 
   Status HandleConvolution(HloInstruction* convolution) override {
@@ -89,8 +93,12 @@ class ShapeVerifier : public DfsHloVisitor {
   }
 
   Status HandleCrossReplicaSum(HloInstruction* crs) override {
-    return CheckShape(crs, ShapeInference::InferCrossReplicaSumShape(
-                               crs->operand(0)->shape()));
+    std::vector<const Shape*> operand_shapes;
+    for (const HloInstruction* operand : crs->operands()) {
+      operand_shapes.push_back(&operand->shape());
+    }
+    return CheckShape(
+        crs, ShapeInference::InferCrossReplicaSumShape(operand_shapes));
   }
 
   Status HandleReducePrecision(HloInstruction* reduce_precision) override {
@@ -283,7 +291,7 @@ class ShapeVerifier : public DfsHloVisitor {
 
   Status HandleSend(HloInstruction* send) override {
     TF_RET_CHECK(send->users().size() == 1);
-    const HloInstruction* send_done = send->users()[0];
+    const HloInstruction* send_done = send->users().front();
     TF_RET_CHECK(send_done->opcode() == HloOpcode::kSendDone);
     TF_RETURN_IF_ERROR(CheckSameChannel(send, send_done));
     return CheckShape(
@@ -301,7 +309,7 @@ class ShapeVerifier : public DfsHloVisitor {
 
   Status HandleRecv(HloInstruction* recv) override {
     TF_RET_CHECK(recv->users().size() == 1);
-    const HloInstruction* recv_done = recv->users()[0];
+    const HloInstruction* recv_done = recv->users().front();
     TF_RET_CHECK(recv_done->opcode() == HloOpcode::kRecvDone);
     TF_RETURN_IF_ERROR(CheckSameChannel(recv, recv_done));
     return CheckShape(recv,

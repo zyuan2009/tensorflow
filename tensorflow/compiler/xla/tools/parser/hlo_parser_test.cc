@@ -655,6 +655,31 @@ ENTRY %InfeedToOutfeed () -> (u32[3], pred[]) {
 }
 
 )"
+},
+// Rng
+{
+"Rng",
+R"(HloModule rng_module:
+
+ENTRY %Rng () -> f32[8] {
+  %constant = f32[] constant(0)
+  %constant.1 = f32[] constant(1)
+  ROOT %rng = f32[8]{0} rng(f32[] %constant, f32[] %constant.1), distribution=rng_uniform
+}
+
+)"
+},
+// Reduce precision
+{
+"ReducePrevison",
+R"(HloModule reduce_precision:
+
+ENTRY %ReducePrecision () -> f32[1] {
+  %constant = f32[1]{0} constant({3.14159})
+  ROOT %reduce-precision = f32[1]{0} reduce-precision(f32[1]{0} %constant), exponent_bits=8, mantissa_bits=10
+}
+
+)"
 }
   });
   // clang-format on
@@ -873,12 +898,6 @@ ENTRY %Convolve1D1Window_0.v3 (input: f32[1,2,1], filter: f32[1,1,1]) -> f32[1,2
                       .status()
                       .error_message(),
                   "must have the same rank");
-
-  ExpectHasSubstr(Parse(StrCat(prefix, ",dim_labels=0bf_io0->b0f", suffix))
-                      .status()
-                      .error_message(),
-                  "output spatial dimensions should be the same as input "
-                  "spatial dimensions");
 }
 
 TEST_F(HloParserTest, UnexpectedAttribute) {
