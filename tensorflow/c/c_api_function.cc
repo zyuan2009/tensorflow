@@ -226,6 +226,11 @@ Status FillFunctionBody(
       }
       node_def->add_input(strings::StrCat("^", normalized));
     }
+
+    // A function is stateful if any of its nodes are stateful.
+    if (node->op_def().is_stateful()) {
+      fdef->mutable_signature()->set_is_stateful(true);
+    }
   }
   return Status::OK();
 }
@@ -307,7 +312,7 @@ Status GraphToFunctionDef(const Graph& fn_body, const string& fn_name,
     TF_RETURN_IF_ERROR(
         NameRangesForNode(*node, node->op_def(), nullptr, &output_ranges));
     for (const auto& output : output_ranges) {
-      const string& output_name = output.first;
+      const StringPiece& output_name = output.first;
       int index_start = output.second.first;
       int index_end = output.second.second;
       for (int i = index_start; i < index_end; ++i) {

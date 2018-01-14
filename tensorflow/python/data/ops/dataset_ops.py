@@ -286,6 +286,23 @@ class Dataset(object):
     sess.run(value)  # (2, array([1, 1]))
     ```
 
+    NOTE: The current implementation of `Dataset.from_generator()` uses
+    @{tf.py_func} and inherits the same constraints. In particular, it
+    requires the `Dataset`- and `Iterator`-related operations to be placed
+    on a device in the same process as the Python program that called
+    `Dataset.from_generator()`. The body of `generator` will not be
+    serialized in a `GraphDef`, and you should not use this method if you
+    need to serialize your model and restore it in a different environment.
+
+    NOTE: If `generator` depends on mutable global variables or other external
+    state, be aware that the runtime may invoke `generator` multiple times
+    (in order to support repeating the `Dataset`) and at any time
+    between the call to `Dataset.from_generator()` and the production of the
+    first element from the generator. Mutating global variables or external
+    state can cause undefined behavior, and we recommend that you explicitly
+    cache any external state in `generator` before calling
+    `Dataset.from_generator()`.
+
     Args:
       generator: A callable object that takes no arguments and returns an
         object that supports the `iter()` protocol.
@@ -707,6 +724,12 @@ class Dataset(object):
   def batch(self, batch_size):
     """Combines consecutive elements of this dataset into batches.
 
+    NOTE: If the number of elements (`N`) in this dataset is not an exact
+    multiple of `batch_size`, the final batch contain smaller tensors with
+    shape `N % batch_size` in the batch dimension. If your program depends on
+    the batches having the same shape, consider using the
+    @{tf.contrib.data.batch_and_drop_remainder} transformation instead.
+
     Args:
       batch_size: A `tf.int64` scalar `tf.Tensor`, representing the number of
         consecutive elements of this dataset to combine in a single batch.
@@ -786,7 +809,7 @@ class Dataset(object):
     ```python
     # Preprocess 4 files concurrently, and interleave blocks of 16 records from
     # each file.
-    filenames = ["/var/data/file1.txt", "/var/data/file2.txt", ..."]
+    filenames = ["/var/data/file1.txt", "/var/data/file2.txt", ...]
     dataset = (Dataset.from_tensor_slices(filenames)
                .interleave(lambda x:
                    TextLineDataset(x).map(parse_fn, num_parallel_calls=1),
@@ -1229,8 +1252,7 @@ class ShuffleDataset(Dataset):
                input_dataset,
                buffer_size,
                seed=None,
-               reshuffle_each_iteration=None,
-               seed2=None):
+               reshuffle_each_iteration=None):
     """Randomly shuffles the elements of this dataset.
 
     Args:
@@ -1244,10 +1266,6 @@ class ShuffleDataset(Dataset):
       reshuffle_each_iteration: (Optional.) A boolean, which if true indicates
         that the dataset should be pseudorandomly reshuffled each time it is
         iterated over. (Defaults to `True`.)
-      seed2: (Optional.) A `tf.int64` scalar `tf.Tensor` used to avoid seed
-        collision. Users should generally not need to specify this. This is
-        supposed to be used when both the seeds for the Dataset op need to be
-        manually specified. If not None, seed must also be non-None.
 
     Returns:
       A `Dataset`.
@@ -1259,10 +1277,7 @@ class ShuffleDataset(Dataset):
     self._input_dataset = input_dataset
     self._buffer_size = ops.convert_to_tensor(
         buffer_size, dtype=dtypes.int64, name="buffer_size")
-    if seed2 is None:
-      seed, seed2 = random_seed.get_seed(seed)
-    elif seed is None:
-      raise ValueError("seed must be non-None if seed2 is non-None.")
+    seed, seed2 = random_seed.get_seed(seed)
     if seed is None:
       self._seed = constant_op.constant(0, dtype=dtypes.int64, name="seed")
     else:

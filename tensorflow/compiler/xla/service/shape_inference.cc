@@ -559,6 +559,8 @@ StatusOr<Shape> InferWindowOutputShape(const Shape& base_shape,
 // Batch Dimensions:
 // *) Same number of batch dimensions on both lhs and rhs.
 // *) Same batch dimension numbers (and sizes) on both lhs and rhs.
+// *) Batch dimension numbers must be ordered before contracting and
+//    non-contracting/non-batch dimension numbers.
 //
 // Non-Contracting-Non-Batch Dimensions:
 // *) Can be 0 (matrix-vector) or 1 (matrix-matrix).
@@ -630,6 +632,19 @@ Status ValidateDotDimensionNumbers(
     return InvalidArgument(
         "batch and contracting dimension number mismatch "
         "with rank ");
+  }
+
+  // Check that batch dimension numbers are ordered before all others, and
+  // that they are monotonically increasing.
+  std::vector<int64> batch_dim_numbers(lhs_batch_dimensions.size());
+  std::iota(batch_dim_numbers.begin(), batch_dim_numbers.end(), 0);
+  if (!std::equal(batch_dim_numbers.begin(), batch_dim_numbers.end(),
+                  lhs_batch_dimensions.begin()) ||
+      !std::equal(batch_dim_numbers.begin(), batch_dim_numbers.end(),
+                  rhs_batch_dimensions.begin())) {
+    return InvalidArgument(
+        "batch dimension numbers must precede non-batch dimensions and be"
+        "monotonically increasing.");
   }
 
   return Status::OK();
@@ -1700,6 +1715,89 @@ ShapeInference::InferDegenerateDimensionBroadcastShape(
   return ShapeUtil::MakeShape(lhs.element_type(), dimensions);
 }
 
+/* static */ StatusOr<Shape> ShapeInference::InferFftShape(
+    const Shape& in, const FftType fft_type,
+    const tensorflow::gtl::ArraySlice<int64> fft_length) {
+  const int64 fft_rank = fft_length.size();
+  if (fft_rank < 1 || fft_rank > 3) {
+    return InvalidArgument("FFT only supports ranks 1-3, but got %lld",
+                           fft_rank);
+  }
+#define RET_CHECK_RANK(x)                              \
+  if (x.dimensions_size() < fft_rank) {                \
+    return InvalidArgument(                            \
+        "FFT of rank %lld requires input of at least " \
+        "same rank; got input of rank %d",             \
+        fft_rank, x.dimensions_size());                \
+  }
+  switch (fft_type) {
+    case FFT:
+    case IFFT:
+      if (in.element_type() != C64) {
+        return InvalidArgument("%s requires C64 input type, found %s",
+                               FftType_Name(fft_type).c_str(),
+                               PrimitiveType_Name(in.element_type()).c_str());
+      }
+      RET_CHECK_RANK(in);
+      return in;
+    case RFFT: {
+      if (in.element_type() != F32) {
+        return InvalidArgument("RFFT requires F32 input type, found %s",
+                               PrimitiveType_Name(in.element_type()).c_str());
+      }
+      RET_CHECK_RANK(in);
+      for (int i = 0; i < fft_rank; i++) {
+        if (in.dimensions(in.dimensions_size() - fft_rank + i) !=
+            fft_length[i]) {
+          return InvalidArgument(
+              "RFFT requires innermost dimensions match fft_length but "
+              "dimension %lld is %lld and should be %lld",
+              in.dimensions_size() - fft_rank + i,
+              in.dimensions(in.dimensions_size() - fft_rank + i),
+              fft_length[i]);
+        }
+      }
+      Shape result = ShapeUtil::ChangeElementType(in, C64);
+      result.set_dimensions(result.dimensions_size() - 1,
+                            fft_length[fft_rank - 1] / 2 + 1);
+      return result;
+    }
+    case IRFFT: {
+      if (in.element_type() != C64) {
+        return InvalidArgument("IRFFT requires C64 input type, found %s",
+                               PrimitiveType_Name(in.element_type()).c_str());
+      }
+      RET_CHECK_RANK(in);
+      Shape result = ShapeUtil::ComplexComponentShape(in);
+      for (int i = 0; i < fft_rank - 1; i++) {
+        if (in.dimensions(in.dimensions_size() - fft_rank + i) !=
+            fft_length[i]) {
+          return InvalidArgument(
+              "IRFFT requires all but one innermost dimensions match "
+              "fft_length, but dimension %lld is %lld and should be %lld",
+              in.dimensions_size() - fft_rank + i,
+              in.dimensions(in.dimensions_size() - fft_rank + i),
+              fft_length[i]);
+        }
+      }
+      if (in.dimensions(in.dimensions_size() - 1) !=
+          fft_length[fft_rank - 1] / 2 + 1) {
+        return InvalidArgument(
+            "IRFFT requires innermost dimension matches fft_length/2+1, but "
+            "dimension %d is %lld and should be %lld",
+            in.dimensions_size() - 1, in.dimensions(in.dimensions_size() - 1),
+            fft_length[fft_rank - 1] / 2 + 1);
+      }
+      result.set_dimensions(result.dimensions_size() - 1,
+                            fft_length[fft_rank - 1]);
+      return result;
+    }
+    default:
+      LOG(FATAL) << "Unexpected fft_type: " << fft_type;
+  }
+#undef RET_CHECK_RANK
+}
+
 /* static */ StatusOr<Shape> ShapeInference::InferCrossReplicaSumShape(
     tensorflow::gtl::ArraySlice<const Shape*> operand_shapes) {
   for (const Shape* operand_shape : operand_shapes) {
@@ -2077,6 +2175,64 @@ ShapeInference::InferDegenerateDimensionBroadcastShape(
   }
 
   return init;
+}
+
+/* static */ StatusOr<Shape> ShapeInference::InferConditionalShape(
+    const Shape& predicate, const Shape& true_operand,
+    const Shape& false_operand, const ProgramShape& true_computation,
+    const ProgramShape& false_computation) {
+  if (!ShapeUtil::ShapeIs(predicate, PRED, {})) {
+    return InvalidArgument("predicate must be a boolean; got %s.",
+                           ShapeUtil::HumanString(predicate).c_str());
+  }
+
+  if (true_computation.parameters_size() != 1) {
+    return InvalidArgument("true_computation must take 1 argument; got %d.",
+                           true_computation.parameters_size());
+  }
+  if (!ShapeUtil::Compatible(true_computation.parameters(0), true_operand)) {
+    auto true_shape_string = [&]() {
+      return tensorflow::strings::Printf(
+          "true_operand: %s; true_computation: %s",
+          ShapeUtil::HumanString(true_operand).c_str(),
+          ShapeUtil::HumanString(true_computation).c_str());
+    };
+    return InvalidArgument(
+        "true_operand must match the shape of the only parameter of "
+        "true_computation: got %s.",
+        true_shape_string().c_str());
+  }
+
+  if (false_computation.parameters_size() != 1) {
+    return InvalidArgument("false_computation must take 1 argument; got %d.",
+                           false_computation.parameters_size());
+  }
+  if (!ShapeUtil::Compatible(false_computation.parameters(0), false_operand)) {
+    auto false_shape_string = [&]() {
+      return tensorflow::strings::Printf(
+          "false_operand: %s; false_computation: %s",
+          ShapeUtil::HumanString(false_operand).c_str(),
+          ShapeUtil::HumanString(false_computation).c_str());
+    };
+    return InvalidArgument(
+        "false_operand must match the shape of the only parameter of "
+        "false_computation: got %s.",
+        false_shape_string().c_str());
+  }
+  if (!ShapeUtil::Compatible(true_computation.result(),
+                             false_computation.result())) {
+    auto shape_string = [&]() {
+      return tensorflow::strings::Printf(
+          "true_computation result: %s; false_computation result: %s.",
+          ShapeUtil::HumanString(true_computation.result()).c_str(),
+          ShapeUtil::HumanString(false_computation.result()).c_str());
+    };
+    return InvalidArgument(
+        "the result of true_computation and false_computation must have the "
+        "same shape: got %s.",
+        shape_string().c_str());
+  }
+  return true_computation.result();
 }
 
 /* static */ StatusOr<Shape> ShapeInference::InferBroadcastShape(

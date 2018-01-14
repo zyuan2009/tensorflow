@@ -109,6 +109,11 @@ class ShapeInference {
       const Shape& lhs, const Shape& rhs, const Window& window,
       const ConvolutionDimensionNumbers& dimension_numbers);
 
+  // Infers the shape produced by the given FFT type on the given operand.
+  static StatusOr<Shape> InferFftShape(
+      const Shape& in, FftType fft_type,
+      tensorflow::gtl::ArraySlice<int64> fft_length);
+
   // Infers the shape produced a cross replica sum with the given operand
   // shapes.
   static StatusOr<Shape> InferCrossReplicaSumShape(
@@ -179,6 +184,12 @@ class ShapeInference {
   static StatusOr<Shape> InferWhileShape(const ProgramShape& condition,
                                          const ProgramShape& body,
                                          const Shape& init);
+
+  // Infers the shape produced by a conditional operation.
+  static StatusOr<Shape> InferConditionalShape(
+      const Shape& predicate, const Shape& true_operand,
+      const Shape& false_operand, const ProgramShape& true_computation,
+      const ProgramShape& false_computation);
 
   // Infers the shape produced by a broadcast operation.
   static StatusOr<Shape> InferBroadcastShape(
