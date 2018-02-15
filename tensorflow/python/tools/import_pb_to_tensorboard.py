@@ -25,6 +25,7 @@ from tensorflow.core.framework import graph_pb2
 from tensorflow.python.client import session
 from tensorflow.python.framework import importer
 from tensorflow.python.framework import ops
+from tensorflow.python.ops import gen_image_ops
 from tensorflow.python.platform import app
 from tensorflow.python.platform import gfile
 from tensorflow.python.summary import summary

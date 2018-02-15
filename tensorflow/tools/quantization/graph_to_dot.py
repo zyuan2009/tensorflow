@@ -45,13 +45,13 @@ def main(unused_args):
     return -1
 
   graph = graph_pb2.GraphDef()
-  with open(FLAGS.graph, "r") as f:
+  with open(FLAGS.graph, "rb") as f:
     if FLAGS.input_binary:
       graph.ParseFromString(f.read())
     else:
       text_format.Merge(f.read(), graph)
 
-  with open(FLAGS.dot_output, "wb") as f:
+  with open(FLAGS.dot_output, "w") as f:
     print("digraph graphname {", file=f)
     for node in graph.node:
       output_name = node.name

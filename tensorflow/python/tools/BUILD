@@ -71,6 +71,7 @@ py_binary(
         "//tensorflow/python:client",
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_ops",
+        "//tensorflow/python:image_ops",
         "//tensorflow/python:platform",
         "//tensorflow/python:summary",
     ],
