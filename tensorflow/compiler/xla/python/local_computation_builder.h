@@ -133,6 +133,9 @@ class LocalComputationBuilder {
 
   std::unique_ptr<Shape> GetShape(const ComputationDataHandle& operand);
 
+  // Returns the shape of the current return value for the computation.
+  StatusOr<Shape> GetReturnValueShape();
+
   ComputationDataHandle Infeed(const Shape& shape);
 
   void Outfeed(const ComputationDataHandle& operand, const Shape& shape,
@@ -249,6 +252,12 @@ class LocalComputationBuilder {
   ComputationDataHandle While(const LocalComputation& condition,
                               const LocalComputation& body,
                               const ComputationDataHandle& init);
+
+  ComputationDataHandle Conditional(const ComputationDataHandle& predicate,
+                                    const ComputationDataHandle& true_operand,
+                                    const LocalComputation& true_computation,
+                                    const ComputationDataHandle& false_operand,
+                                    const LocalComputation& false_computation);
 
 #define _FORWARD(method_name, return_sig, args_sig) \
   return_sig method_name args_sig;

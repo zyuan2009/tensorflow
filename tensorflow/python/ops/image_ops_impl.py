@@ -1339,6 +1339,26 @@ def adjust_saturation(image, saturation_factor, name=None):
         orig_dtype)
 
 
+@tf_export('image.is_jpeg')
+def is_jpeg(contents, name=None):
+  r"""Convenience function to check if the 'contents' encodes a JPEG image.
+
+  Args:
+    contents: 0-D `string`. The encoded image bytes.
+    name: A name for the operation (optional)
+
+  Returns:
+     A scalar boolean tensor indicating if 'contents' may be a JPEG image.
+     is_jpeg is susceptible to false positives.
+  """
+  # Normal JPEGs start with \xff\xd8\xff\xe0
+  # JPEG with EXIF stats with \xff\xd8\xff\xe1
+  # Use \xff\xd8\xff to cover both.
+  with ops.name_scope(name, 'is_jpeg'):
+    substr = string_ops.substr(contents, 0, 3)
+    return math_ops.equal(substr, b'\xff\xd8\xff', name=name)
+
+
 @tf_export('image.decode_image')
 def decode_image(contents, channels=None, name=None):
   """Convenience function for `decode_bmp`, `decode_gif`, `decode_jpeg`,
@@ -1427,8 +1447,8 @@ def decode_image(contents, channels=None, name=None):
 
     # Decode normal JPEG images (start with \xff\xd8\xff\xe0)
     # as well as JPEG images with EXIF data (start with \xff\xd8\xff\xe1).
-    is_jpeg = math_ops.equal(substr, b'\xff\xd8\xff', name='is_jpeg')
-    return control_flow_ops.cond(is_jpeg, _jpeg, check_png, name='cond_jpeg')
+    return control_flow_ops.cond(
+        is_jpeg(contents), _jpeg, check_png, name='cond_jpeg')
 
 
 @tf_export('image.total_variation')
@@ -1671,8 +1691,8 @@ def non_max_suppression(boxes,
     # pylint: enable=protected-access
 
 
-_rgb_to_yiq_kernel = [[0.299, 0.59590059, 0.2115],
-                      [0.587, -0.27455667, -0.52273617],
+_rgb_to_yiq_kernel = [[0.299, 0.59590059,
+                       0.2115], [0.587, -0.27455667, -0.52273617],
                       [0.114, -0.32134392, 0.31119955]]
 
 
@@ -1694,11 +1714,10 @@ def rgb_to_yiq(images):
   kernel = ops.convert_to_tensor(
       _rgb_to_yiq_kernel, dtype=images.dtype, name='kernel')
   ndims = images.get_shape().ndims
-  return math_ops.tensordot(images, kernel, axes=[[ndims-1], [0]])
+  return math_ops.tensordot(images, kernel, axes=[[ndims - 1], [0]])
 
 
-_yiq_to_rgb_kernel = [[1, 1, 1],
-                      [0.95598634, -0.27201283, -1.10674021],
+_yiq_to_rgb_kernel = [[1, 1, 1], [0.95598634, -0.27201283, -1.10674021],
                       [0.6208248, -0.64720424, 1.70423049]]
 
 
@@ -1721,11 +1740,11 @@ def yiq_to_rgb(images):
   kernel = ops.convert_to_tensor(
       _yiq_to_rgb_kernel, dtype=images.dtype, name='kernel')
   ndims = images.get_shape().ndims
-  return math_ops.tensordot(images, kernel, axes=[[ndims-1], [0]])
+  return math_ops.tensordot(images, kernel, axes=[[ndims - 1], [0]])
 
 
-_rgb_to_yuv_kernel = [[0.299, -0.14714119, 0.61497538],
-                      [0.587, -0.28886916, -0.51496512],
+_rgb_to_yuv_kernel = [[0.299, -0.14714119,
+                       0.61497538], [0.587, -0.28886916, -0.51496512],
                       [0.114, 0.43601035, -0.10001026]]
 
 
@@ -1747,11 +1766,10 @@ def rgb_to_yuv(images):
   kernel = ops.convert_to_tensor(
       _rgb_to_yuv_kernel, dtype=images.dtype, name='kernel')
   ndims = images.get_shape().ndims
-  return math_ops.tensordot(images, kernel, axes=[[ndims-1], [0]])
+  return math_ops.tensordot(images, kernel, axes=[[ndims - 1], [0]])
 
 
-_yuv_to_rgb_kernel = [[1, 1, 1],
-                      [0, -0.394642334, 2.03206185],
+_yuv_to_rgb_kernel = [[1, 1, 1], [0, -0.394642334, 2.03206185],
                       [1.13988303, -0.58062185, 0]]
 
 
@@ -1774,5 +1792,4 @@ def yuv_to_rgb(images):
   kernel = ops.convert_to_tensor(
       _yuv_to_rgb_kernel, dtype=images.dtype, name='kernel')
   ndims = images.get_shape().ndims
-  return math_ops.tensordot(images, kernel, axes=[[ndims-1], [0]])
-
+  return math_ops.tensordot(images, kernel, axes=[[ndims - 1], [0]])

@@ -182,6 +182,10 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
 
   string DebugString(Handle h) override;
 
+  Status Clone(std::unique_ptr<FunctionLibraryDefinition>* out_lib_def,
+               std::unique_ptr<ProcessFunctionLibraryRuntime>* out_pflr,
+               FunctionLibraryRuntime** out_flr) override;
+
  private:
   typedef FunctionLibraryRuntimeImpl ME;
 
@@ -627,7 +631,7 @@ Status FunctionLibraryRuntimeImpl::CreateItem(Handle handle, Item** item) {
   };
   Graph* graph = g.get();
   Executor* exec;
-  TF_RETURN_IF_ERROR(NewLocalExecutor(params, g.release(), &exec));
+  TF_RETURN_IF_ERROR(NewLocalExecutor(params, std::move(g), &exec));
 
   {
     // Guard item since it is already inserted in items_.
@@ -891,6 +895,21 @@ string FunctionLibraryRuntimeImpl::DebugString(Handle handle) {
     return tensorflow::DebugString(item->graph);
   } else {
     return s.ToString();
+  }
+}
+
+Status FunctionLibraryRuntimeImpl::Clone(
+    std::unique_ptr<FunctionLibraryDefinition>* out_lib_def,
+    std::unique_ptr<ProcessFunctionLibraryRuntime>* out_pflr,
+    FunctionLibraryRuntime** out_flr) {
+  TF_RETURN_IF_ERROR(
+      parent_->Clone(env_, graph_def_version_, optimizer_.options(),
+                     custom_kernel_creator_, out_lib_def, out_pflr));
+  *out_flr = (*out_pflr)->GetFLR(device_->name());
+  if (out_flr != nullptr) {
+    return Status::OK();
+  } else {
+    return errors::Internal("Cloning FunctionLibraryRuntime failed.");
   }
 }
 

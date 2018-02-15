@@ -104,10 +104,9 @@ TEST_F(OperatorTest, SimpleOperators) {
   CheckSimpleOperator<ReluOperator>("RELU", OperatorType::kRelu);
   CheckSimpleOperator<Relu1Operator>("RELU_N1_TO_1", OperatorType::kRelu1);
   CheckSimpleOperator<Relu6Operator>("RELU6", OperatorType::kRelu6);
-  CheckSimpleOperator<ResizeBilinearOperator>("RESIZE_BILINEAR",
-                                              OperatorType::kResizeBilinear);
   CheckSimpleOperator<LogisticOperator>("LOGISTIC", OperatorType::kLogistic);
   CheckSimpleOperator<TanhOperator>("TANH", OperatorType::kTanh);
+  CheckSimpleOperator<ExpOperator>("EXP", OperatorType::kExp);
 }
 
 TEST_F(OperatorTest, BuiltinAdd) {
@@ -329,6 +328,14 @@ TEST_F(OperatorTest, BuiltinMul) {
       SerializeAndDeserialize(GetOperator("MUL", OperatorType::kMul), op);
   EXPECT_EQ(op.fused_activation_function,
             output_toco_op->fused_activation_function);
+}
+
+TEST_F(OperatorTest, ResizeBilinear) {
+  ResizeBilinearOperator op;
+  op.align_corners = true;
+  auto output_toco_op = SerializeAndDeserialize(
+      GetOperator("RESIZE_BILINEAR", OperatorType::kResizeBilinear), op);
+  EXPECT_EQ(op.align_corners, output_toco_op->align_corners);
 }
 
 TEST_F(OperatorTest, Svdf) {

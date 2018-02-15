@@ -303,6 +303,11 @@ std::unique_ptr<Shape> LocalComputationBuilder::GetShape(
   return builder_.GetShape(operand).ConsumeValueOrDie();
 }
 
+StatusOr<Shape> LocalComputationBuilder::GetReturnValueShape() {
+  TF_ASSIGN_OR_RETURN(ProgramShape program_shape, builder_.GetProgramShape());
+  return program_shape.result();
+}
+
 ComputationDataHandle LocalComputationBuilder::Infeed(const Shape& shape) {
   return builder_.Infeed(shape);
 }
@@ -491,6 +496,17 @@ ComputationDataHandle LocalComputationBuilder::While(
     const LocalComputation& condition, const LocalComputation& body,
     const ComputationDataHandle& init) {
   return builder_.While(condition.computation(), body.computation(), init);
+}
+
+ComputationDataHandle LocalComputationBuilder::Conditional(
+    const ComputationDataHandle& predicate,
+    const ComputationDataHandle& true_operand,
+    const LocalComputation& true_computation,
+    const ComputationDataHandle& false_operand,
+    const LocalComputation& false_computation) {
+  return builder_.Conditional(predicate, true_operand,
+                              true_computation.computation(), false_operand,
+                              false_computation.computation());
 }
 
 #define _FORWARD(method_name, return_sig, args_sig, args)    \

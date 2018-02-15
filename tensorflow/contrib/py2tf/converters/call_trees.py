@@ -192,28 +192,15 @@ class CallTreeTransformer(transformer.Base):
           # The renaming process will transform it into a regular function.
           # TODO(mdan): Is this complete? How does it work with nested members?
           node.args = [node.func.value] + node.args
-      node.func = gast.Name(new_name, gast.Load(), None)
+      node.func = templates.replace('func_name', func_name=new_name)[0]
     return node
 
   def _wrap_to_py_func_no_return(self, node):
-    args_scope = anno.getanno(node, 'args_scope')
     # TODO(mdan): Properly handle varargs, kwargs, etc.
     template = """
-      def wrapper(args):
-        call(args)
-        return 1
-      tf.py_func(wrapper, [args], [tf.int64])
+      py2tf_utils.wrap_py_func(func, None, (original_args,), True)
     """
-    wrapper_def, call_expr = templates.replace(
-        template,
-        call=node.func,
-        wrapper=self.context.namer.compiled_function_name(node.func.id)[0],
-        args=tuple(gast.Name(n, gast.Load(), None) for n in args_scope.used))
-    anno.setanno(call_expr.value, 'args_scope', args_scope)
-    # TODO(mdan): Rename this annotation to 'graph_ready'
-    anno.setanno(wrapper_def, 'skip_processing', True)
-
-    return (wrapper_def, call_expr)
+    return templates.replace(template, func=node.func, original_args=node.args)
 
   def _function_is_compilable(self, target_entity):
     # TODO(mdan): This is just a placeholder. Implement.
