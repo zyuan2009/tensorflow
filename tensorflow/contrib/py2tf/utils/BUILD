@@ -20,11 +20,13 @@ py_library(
     name = "utils",
     srcs = [
         "__init__.py",
+        "builtins.py",
         "context_managers.py",
         "misc.py",
         "multiple_dispatch.py",
         "py_func.py",
         "tensor_list.py",
+        "testing.py",
         "type_check.py",
     ],
     srcs_version = "PY2AND3",

@@ -104,6 +104,7 @@ cc_library(
         "add.cc",
         "basic_rnn.cc",
         "batch_to_space_nd.cc",
+        "bidirectional_sequence_lstm.cc",
         "bidirectional_sequence_rnn.cc",
         "concatenation.cc",
         "conv.cc",
@@ -129,10 +130,12 @@ cc_library(
         "skip_gram.cc",
         "space_to_batch_nd.cc",
         "space_to_depth.cc",
+        "split.cc",
         "squeeze.cc",
         "strided_slice.cc",
         "sub.cc",
         "svdf.cc",
+        "topk_v2.cc",
         "transpose.cc",
         "unidirectional_sequence_lstm.cc",
         "unidirectional_sequence_rnn.cc",
@@ -281,6 +284,18 @@ tf_cc_test(
 )
 
 tf_cc_test(
+    name = "bidirectional_sequence_lstm_test",
+    size = "small",
+    srcs = ["bidirectional_sequence_lstm_test.cc"],
+    deps = [
+        ":builtin_ops",
+        "//tensorflow/contrib/lite:framework",
+        "//tensorflow/contrib/lite/kernels:test_util",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+tf_cc_test(
     name = "unidirectional_sequence_lstm_test",
     size = "small",
     srcs = ["unidirectional_sequence_lstm_test.cc"],
@@ -402,6 +417,19 @@ tf_cc_test(
 )
 
 tf_cc_test(
+    name = "topk_v2_test",
+    size = "small",
+    srcs = ["topk_v2_test.cc"],
+    deps = [
+        ":builtin_ops",
+        "//tensorflow/contrib/lite:builtin_op_data",
+        "//tensorflow/contrib/lite:framework",
+        "//tensorflow/contrib/lite/kernels:test_util",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+tf_cc_test(
     name = "resize_bilinear_test",
     size = "small",
     srcs = ["resize_bilinear_test.cc"],
@@ -499,6 +527,19 @@ tf_cc_test(
 )
 
 tf_cc_test(
+    name = "log_softmax_test",
+    size = "small",
+    srcs = ["log_softmax_test.cc"],
+    deps = [
+        ":builtin_ops",
+        "//tensorflow/contrib/lite:framework",
+        "//tensorflow/contrib/lite/kernels:test_util",
+        "//tensorflow/contrib/lite/kernels/internal:reference_base",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+tf_cc_test(
     name = "lsh_projection_test",
     size = "small",
     srcs = ["lsh_projection_test.cc"],
@@ -552,6 +593,18 @@ tf_cc_test(
     name = "space_to_depth_test",
     size = "small",
     srcs = ["space_to_depth_test.cc"],
+    deps = [
+        ":builtin_ops",
+        "//tensorflow/contrib/lite:framework",
+        "//tensorflow/contrib/lite/kernels:test_util",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+tf_cc_test(
+    name = "split_test",
+    size = "small",
+    srcs = ["split_test.cc"],
     deps = [
         ":builtin_ops",
         "//tensorflow/contrib/lite:framework",
